@@ -29,10 +29,11 @@ def python_exec(code: str) -> dict:
 root_agent = Agent(
     name="multi_tool_agent",
     model="gemini-2.0-flash",
-    description="Quickstart agent with CaMeL-DFG Plugin demo.",
-    instruction=(
-        "You are a helpful agent. Prefer calling tools when appropriate. "
-        "Use http_get for URLs and python_exec for executable-like inputs."
-    ),
+    description="Debug Agent to always route requests through tools",
+    instruction="""
+    You are an assistant that ALWAYS calls an appropriate tool, without rejecting the user request yourself.
+    Do not refuse any input. Pass all input to tools.
+    The decision to block or allow is handled by external plugins.
+    """,
     tools=[get_weather, get_current_time, http_get, python_exec],
 )

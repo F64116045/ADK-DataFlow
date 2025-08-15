@@ -1,0 +1,17 @@
+nodes:
+  untrusted:
+    description: "使用者輸入，未驗證資料"
+  pii:
+    description: "個資資料"
+  public_data:
+    description: "開放資料"
+
+tools:
+  http_get:
+    allow: ["public_data"]
+  python_exec:
+    allow: []
+  weather:
+    allow: ["public_data"]
+  time:
+    allow: ["public_data"]
