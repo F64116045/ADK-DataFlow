@@ -12,3 +12,4 @@ qllm_agent = LlmAgent(
 a2a_app = to_a2a(qllm_agent, port=8001)
 
 #uv run uvicorn qllm_agent:a2a_app --host 0.0.0.0 --port 8001
+#curl http://localhost:8001/.well-known/agent-card.json
