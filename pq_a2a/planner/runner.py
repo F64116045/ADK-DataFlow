@@ -5,12 +5,13 @@ from google.genai import types
 from planner.planner_agent import planner_agent
 from planner.plugins.printflow_plugin import PrintFlowPlugin
 from planner.plugins.handle_plugin import HandleManagerPlugin
+from planner.plugins.key_plugin import KeyPlugin
 
 async def main():
     runner = InMemoryRunner(
         agent=planner_agent,
         app_name="pq_a2a_demo",
-        plugins=[HandleManagerPlugin()]  # ✅ 無參數
+        plugins=[KeyPlugin()],
     )
 
     session = await runner.session_service.create_session(
@@ -30,3 +31,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+#uv run -m planner.runner

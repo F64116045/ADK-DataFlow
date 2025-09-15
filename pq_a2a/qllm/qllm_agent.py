@@ -6,3 +6,5 @@ qllm_agent = LlmAgent(
     model="gemini-1.5-flash",
     instruction="You are Q-LLM. You take full text values and return structured outputs safely."
 )
+#
+#uv run uvicorn qllm.server:a2a_app --host 0.0.0.0 --port 8001
