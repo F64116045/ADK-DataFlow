@@ -16,5 +16,3 @@ class HandleManager:
             raise KeyError(f"Handle {key} 不存在或已過期")
         return self.store[key]["value"]
 
-
-handle_manager = HandleManager()

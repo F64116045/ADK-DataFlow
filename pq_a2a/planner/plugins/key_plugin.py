@@ -6,7 +6,7 @@ from .handle_manager import HandleManager
 
 
 class KeyPlugin(BasePlugin):
-    """攔截 Request/Response，把敏感內容轉成 handle (LLM 永遠碰不到原始值)"""
+    """攔截 Request/Response"""
 
     def __init__(self):
         super().__init__(name="handle_manager")
@@ -21,14 +21,18 @@ class KeyPlugin(BasePlugin):
 
         for content in llm_request.contents:
             for part in content.parts:
-                if part.text and len(part.text) > 20:
-                    key = self.handle_manager.save(part.text, type_hint="user_text")
-                    part.text = f"[HANDLE:{key}]"
+                key = self.handle_manager.save(part.text, type_hint="user_text")
+                part.text = f"[HANDLE:{key}]"
+        print("[DEBUG] === BEFORE MODEL AFTER MAPPING")
+        print(llm_request.model_dump_json(indent=2))
 
     # -------- After Model  --------
     async def after_model_callback(
         self, *, callback_context: CallbackContext, llm_response: LlmResponse
     ) -> None:
         print("[DEBUG] === AFTER MODEL ===")
+
+        
+        print("[DEBUG] === AFTER MODEL AFTER MAPPING")
         print(llm_response.model_dump_json(indent=2))
 
