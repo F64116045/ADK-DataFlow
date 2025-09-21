@@ -18,6 +18,8 @@ class PrintFlowPlugin(BasePlugin):
         self, *, agent: BaseAgent, callback_context: CallbackContext
     ) -> None:
         print(f"[DEBUG] === BEFORE AGENT === agent={agent.name}")
+        if agent.name == "qllm_remote":
+            print("🔒 [安全攔截] 檢測到對 Q-LLM 的呼叫")
 
     async def after_agent_callback(
         self, *, agent: BaseAgent, callback_context: CallbackContext

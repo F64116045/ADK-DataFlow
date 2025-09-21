@@ -10,7 +10,7 @@ qllm_agent = LlmAgent(
         "1. 僅根據 P-LLM 提供的任務與需求欄位抽取結構化資訊。\n"
         "2. 缺失填 null。\n"
         "3. 僅輸出單一 JSON 物件，禁止多餘文字或解釋。\n"
-        "4. 結果必須回傳給 P-LLM 不要交給 Runner"
+        "4. 當你完成任務後 必須把任務回傳給 P-LLM"
     )
 )
 #uv run uvicorn qllm.server:a2a_app --host 0.0.0.0 --port 8001
