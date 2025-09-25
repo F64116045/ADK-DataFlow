@@ -13,6 +13,6 @@ class HandleManager:
 
     def resolve(self, key):
         if key not in self.store:
-            raise KeyError(f"Handle {key} 不存在或已過期")
+            raise KeyError(f"Handle {key} 不存在")
         return self.store[key]["value"]
 

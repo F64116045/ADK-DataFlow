@@ -36,9 +36,9 @@ planner_agent = Agent(
         "你要做的事：\n"
         "1. 與 User 對話，理解並拆解任務需求。\n"
         "2. 規劃任務步驟，並決定哪些需要呼叫工具或 Q-LLM。\n"
-        "3. 當需要解析原始資料時，組裝你需要的欄位的 JSON 格式，交給 Q-LLM。\n"
-        "4. 你必須要指定 Q-LLM 回傳的 JSON 格式，並附帶key，格式為 指令與你要的JSON資料，key=xxxxx\n"
-        "5. 維持全域上下文與進度，最後將完整任務結果回傳 User。\n"
+        "3. 當需要解析原始資料時如工具回傳值，組裝你需要的欄位的格式，交給 Q-LLM，明確告知你需要甚麼。\n"
+        "4. 你必須要指定 Q-LLM 回傳的 JSON 格式，並附帶key，請嚴格遵守以下格式: {[指令與你要的JSON資料]，[key=xxxxx]}\n"
+        "5. Q-LLM 回傳的結果也是一個 key ，你就當作那個 Key 是答案，並把Key放進你的回答中回傳給 User。\n"
     ),
     tools = [weather_tool, qllm_tool]
 )
