@@ -17,6 +17,20 @@ RED = "\033[91m"
 PURPLE = "\033[95m"
 CYAN = "\033[96m"
 
+TYPE_MAP = {
+    "int": int,
+    "integer": int,
+    "float": float,
+    "number": (int, float),
+    "string": str,
+    "str": str,
+    "bool": bool,
+    "boolean": bool,
+    "object": dict,
+    "array": list,
+    "list": list,
+}
+
 
 def resolve_keys(obj: Any, handle_manager: HandleManager) -> Any:
     """遞迴解析 key:xxx → 真值"""
@@ -127,6 +141,51 @@ class KeyPlugin(BasePlugin):
         print(f"   {GREEN}Tool will execute with modified args{RESET}")
         return None
 
+    # ========== format CHECKING ==========
+    def _validate_qllm_schema(self, tool_args: dict, result: dict):
+        """檢查 Q-LLM 回傳的值是否符合 P-LLM format 的型別"""
+        try:
+            req_json = json.loads(tool_args.get("request", "{}"))
+            expected_format = req_json.get("format", {})
+
+            if isinstance(result, str):
+                result = json.loads(result)
+
+            errors = []
+
+            for field, expected_type in expected_format.items():
+                if field not in result:
+                    errors.append(f"Missing field: {field}")
+                    continue
+
+                value = result[field]
+                py_type = TYPE_MAP.get(expected_type.lower())
+
+                if not py_type:
+                    print(f"{YELLOW}[SchemaCheck] Unknown type spec: {expected_type}{RESET}")
+                    continue
+
+                if not isinstance(value, py_type):
+                    errors.append(
+                        f"Field '{field}' expected {expected_type}, got {type(value).__name__}: {value}"
+                    )
+
+            if errors:
+                print(f"{RED}[SchemaCheck] Errors:{RESET}")
+                for e in errors:
+                    print(f"   - {e}")
+                return False
+
+            print(f"{GREEN}[SchemaCheck] All fields match expected types ✔{RESET}")
+            return True
+
+        except Exception as e:
+            print(f"{RED}[SchemaCheck] Error validating schema:{RESET} {e}")
+            return False
+
+
+
+
     # ========== After Tool ==========
     async def after_tool_callback(
         self,
@@ -143,6 +202,10 @@ class KeyPlugin(BasePlugin):
         
         # 檢查 qllm_remote 是否正常
         if tool.name == "qllm_remote":
+            ok = self._validate_qllm_schema(tool_args, result)
+            if not ok:
+                raise ValueError(f"Q-LLM 回傳的資料不符合格式或型別要求！")
+
             if isinstance(result, dict) and "request" in result:
                 print(f"   {RED}  qllm_remote 返回了輸入，沒有實際處理{RESET}")
             else:
@@ -202,51 +265,60 @@ class KeyPlugin(BasePlugin):
     async def after_agent_callback(self, *, agent, callback_context):
         print(f"\n{BOLD}{YELLOW} [AfterAgent]{RESET} {agent.name}")
 
-        session = callback_context._invocation_context.session
-        events = session.events
+        try:
+            session = callback_context._invocation_context.session
+            events = getattr(session, "events", [])
 
-        last_model_event = next(
-            (e for e in reversed(events) if e.content.role == "model"),
-            None,
-        )
-        if not last_model_event:
-            print(f"   └─ No model event found")
-            return None
+            # 找到最後一個 model event（要防止 e.content 為 None）
+            last_model_event = next(
+                (e for e in reversed(events) if e.content and getattr(e.content, "role", None) == "model"),
+                None,
+            )
 
-        original_content: genai_types.Content = last_model_event.content
-        texts = [p.text for p in original_content.parts if getattr(p, "text", None)]
-        
-        if not texts:
-            print(f"   └─ No text parts found")
-            return None
-            
-        full_text = " ".join(texts)
-        print(f"   ├─ Original Output: {full_text}")
+            if not last_model_event:
+                print(f"   └─ No model event found")
+                return None
 
-        # 新功能：Resolve keys in final output
-        def replace_key(match):
-            key = match.group(1)
-            try:
-                resolved_value = self.handle_manager.resolve(key)
-                print(f"   {CYAN}Final key resolve:{RESET} key:{key} → {type(resolved_value).__name__}")
-                
-                if isinstance(resolved_value, dict):
-                    return json.dumps(resolved_value, ensure_ascii=False, indent=2)
-                elif isinstance(resolved_value, (list, tuple)):
-                    return json.dumps(resolved_value, ensure_ascii=False)
-                else:
-                    return str(resolved_value)
-            except KeyError:
-                print(f"{RED}Key not found in final output:{RESET} {key}")
-                return f"key:{key}"
+            original_content: genai_types.Content = last_model_event.content
 
-        # 使用正則表達式替換所有 key:xxx
-        modified_text = re.sub(r"key:([A-Za-z0-9\-]+)", replace_key, full_text)
-        
-        if modified_text != full_text:
-            print(f"   {GREEN}Final output modified{RESET}")
-            print(f"   └─ Resolved Output: {modified_text}")
-            return genai_types.Content(parts=[genai_types.Part(text=modified_text)])
-        else:
-            print(f"   └─ No keys to resolve in final output")
+            # 收集 text parts
+            texts = [p.text for p in getattr(original_content, "parts", []) if getattr(p, "text", None)]
+            if not texts:
+                print(f"   └─ No text parts found")
+                return None
+
+            full_text = " ".join(texts)
+            print(f"   ├─ Original Output: {full_text}")
+
+            # ========== Key Resolve ==========
+            def replace_key(match):
+                key = match.group(1)
+                try:
+                    resolved_value = self.handle_manager.resolve(key)
+                    print(f"   {CYAN}Final key resolve:{RESET} key:{key} → {type(resolved_value).__name__}")
+
+                    if isinstance(resolved_value, dict):
+                        return json.dumps(resolved_value, ensure_ascii=False, indent=2)
+                    elif isinstance(resolved_value, (list, tuple)):
+                        return json.dumps(resolved_value, ensure_ascii=False)
+                    else:
+                        return str(resolved_value)
+
+                except KeyError:
+                    print(f"{RED}Key not found in final output:{RESET} {key}")
+                    return f"key:{key}"
+
+            # 替換所有 key:xxxx
+            modified_text = re.sub(r"key:([A-Za-z0-9\-]+)", replace_key, full_text)
+
+            if modified_text != full_text:
+                print(f"   {GREEN}Final output modified{RESET}")
+                print(f"   └─ Resolved Output: {modified_text}")
+                return genai_types.Content(parts=[genai_types.Part(text=modified_text)])
+            else:
+                print(f"   └─ No keys to resolve in final output")
+                return None
+
+        except Exception as e:
+            print(f"{RED}[AfterAgent Error]{RESET} {e}")
             return None

@@ -20,7 +20,7 @@ async def main():
         app_name="pq_a2a_demo",
     )
 
-    prompt = "查詢london的溫度並發布溫度警報"
+    prompt = "查詢london的溫度"
     async for event in runner.run_async(
         user_id="user",
         session_id=session.id,
