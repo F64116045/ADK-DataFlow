@@ -17,6 +17,20 @@ RED = "\033[91m"
 PURPLE = "\033[95m"
 CYAN = "\033[96m"
 
+TYPE_MAP = {
+    "int": int,
+    "integer": int,
+    "float": float,
+    "number": (int, float),
+    "string": str,
+    "str": str,
+    "bool": bool,
+    "boolean": bool,
+    "object": dict,
+    "array": list,
+    "list": list,
+}
+
 
 def resolve_keys(obj: Any, handle_manager: HandleManager) -> Any:
     """遞迴解析 key:xxx → 真值"""
@@ -55,6 +69,7 @@ class KeyPlugin(BasePlugin):
         print(f"   └─ User Input: {callback_context.user_content}")
 
     # ========== Before Tool ==========
+    # ========== Before Tool ==========
     async def before_tool_callback(
         self,
         *,
@@ -62,70 +77,143 @@ class KeyPlugin(BasePlugin):
         tool_args: dict[str, Any],
         tool_context: ToolContext,
     ) -> dict | None:
-        print(f"\n{BOLD}{BLUE} [BeforeTool]{RESET} {tool.name}")
+        print(f"\n{BOLD}{BLUE}[BeforeTool]{RESET} {tool.name}")
         print(f"   └─ Raw Args: {tool_args}")
-        
-        # 特別顯示 qllm_remote 的 request 內容（還沒 resolve 前）
+
+        # 🔹 Step 1. 遞迴解析所有 key:xxx → 真值
+        resolved_args = resolve_keys(tool_args, self.handle_manager)
+
+        # 🔹 Step 2. 若為 qllm_remote，進一步處理 request
+        if tool.name == "qllm_remote" and "request" in resolved_args:
+            req = resolved_args["request"]
+
+            print(f"\n{BOLD}{CYAN}[Processing qllm_remote.request]{RESET}")
+
+            # --- Case 1: request 是 dict（尚未序列化） ---
+            if isinstance(req, dict):
+                print(f"   ├─ Detected dict input → serializing to JSON string")
+                resolved_args["request"] = json.dumps(req, ensure_ascii=False, indent=None)
+
+            # --- Case 2: request 是 JSON 字串，嘗試反序列化後再轉回 ---
+            elif isinstance(req, str):
+                try:
+                    data = json.loads(req)
+                    print(f"   ├─ Parsed request JSON successfully")
+                    # 解析內部的 key:xxx
+                    data = resolve_keys(data, self.handle_manager)
+                    resolved_args["request"] = json.dumps(data, ensure_ascii=False, indent=None)
+                except Exception as e:
+                    print(f"   {YELLOW}└─ Skipped: request is plain string or invalid JSON ({e}){RESET}")
+            else:
+                print(f"   {YELLOW}└─ Unsupported request type ({type(req).__name__}), ignoring{RESET}")
+
+            # 顯示最終 JSON
+            try:
+                parsed = json.loads(resolved_args["request"])
+                print(f"   └─ Final request JSON for qllm:")
+                for k, v in parsed.items():
+                    preview = (v[:80] + "...") if isinstance(v, str) and len(v) > 80 else v
+                    print(f"      {k}: {preview}")
+            except Exception:
+                print(f"   {YELLOW}└─ Unable to pretty-print final request{RESET}")
+
+        # 🔹 Step 3. 更新 tool_args（原地修改）
+        if resolved_args != tool_args:
+            print(f"\n{BOLD}{CYAN}[In-place Args Modification]{RESET}")
+            tool_args.clear()
+            tool_args.update(resolved_args)
+            print(f"   {GREEN}Args modified in-place{RESET}")
+
+        # 🔹 Step 4. 顯示最終狀態
         if tool.name == "qllm_remote" and "request" in tool_args:
             try:
-                req_data = json.loads(tool_args["request"])
-                print(f"   └─ Request JSON (Raw):")
-                for key, value in req_data.items():
+                data = json.loads(tool_args["request"])
+                print(f"   └─ Verified final JSON structure:")
+                for key, value in data.items():
                     if isinstance(value, str) and len(value) > 50:
                         print(f"      {key}: {value[:50]}...")
                     else:
                         print(f"      {key}: {value}")
-            except:
-                print(f"   └─ Request (raw): {tool_args['request']}")
-
-        # Resolve keys in arguments
-        resolved_args = resolve_keys(tool_args, self.handle_manager)
-
-        # 特別處理 qllm_remote 的 JSON request
-        if tool.name == "qllm_remote" and "request" in resolved_args:
-            req = resolved_args["request"]
-            if isinstance(req, str):
-                try:
-                    print(f"\n{BOLD}{CYAN} [Resolving qllm JSON]{RESET}")
-                    data = json.loads(req)
-                    # 再次解析 JSON 內部的 keys
-                    data = resolve_keys(data, self.handle_manager)
-                    resolved_args["request"] = json.dumps(data, ensure_ascii=False)
-                    
-                    print(f"   └─ Final JSON for qllm:")
-                    for key, value in data.items():
-                        if isinstance(value, str) and len(value) > 50:
-                            print(f"      {key}: {value[:50]}...")
-                        else:
-                            print(f"      {key}: {value}")
-                except Exception as e:
-                    print(f"{RED}JSON parse error:{RESET} {e}")
-
-        # 直接修改 tool_args ，不 return
-        if resolved_args != tool_args:
-            print(f"\n{BOLD}{CYAN} [In-place Args Modification]{RESET}")
-            
-            # 清空並重新填入 resolved args
-            tool_args.clear()
-            tool_args.update(resolved_args)
-            
-            print(f"   {GREEN} Args modified in-place{RESET}")
-            
-            # 顯示修改後的最終狀態
-            if tool.name == "qllm_remote" and "request" in tool_args:
-                try:
-                    data = json.loads(tool_args["request"])
-                    print(f"   └─ Modified JSON for qllm:")
-                    for key, value in data.items():
-                        if isinstance(value, str) and len(value) > 50:
-                            print(f"      {key}: {value[:50]}...")
-                        else:
-                            print(f"      {key}: {value}")
-                except:
-                    pass
+            except Exception:
+                print(f"   {YELLOW}└─ Request remains as plain string{RESET}")
 
         print(f"   {GREEN}Tool will execute with modified args{RESET}")
         return None
+
+
+
+    # ========== format CHECKING ==========
+    import json, re
+    from datetime import datetime
+
+    def _validate_qllm_schema(self, tool_args: dict, result: dict):
+        try:
+            req_json = json.loads(tool_args.get("request", "{}"))
+            expected_format = req_json.get("format", {})
+
+            # --- Step 1: 抽取 JSON 片段 ---
+            if isinstance(result, str):
+                # 去掉 code fence
+                clean = re.sub(r"^```(?:json)?", "", result.strip(), flags=re.I)
+                clean = re.sub(r"```$", "", clean.strip(), flags=re.I)
+                # 只取 { ... }
+                m = re.search(r"\{[\s\S]*\}", clean)
+                if m:
+                    result = m.group(0)
+            # --- Step 2: 嘗試解析 ---
+            if isinstance(result, str):
+                result = json.loads(result)
+
+            errors = []
+            coerced = {}
+
+            # --- Step 3: 型別檢查與轉型 ---
+            for field, typ in expected_format.items():
+                val = result.get(field)
+                if val is None:
+                    errors.append(f"Missing field: {field}")
+                    coerced[field] = None
+                    continue
+
+                if typ == "float":
+                    try:
+                        coerced[field] = float(val)
+                    except:
+                        errors.append(f"Field '{field}' expected float, got {val}")
+                        coerced[field] = None
+                elif typ == "string":
+                    if field.lower() == "date":
+                        # 嘗試正規化日期
+                        try:
+                            dt = datetime.strptime(str(val), "%Y-%m-%d")
+                            coerced[field] = dt.strftime("%Y-%m-%d")
+                        except:
+                            # 嘗試 Month Year → YYYY-MM-01
+                            try:
+                                dt = datetime.strptime(str(val), "%B %Y")
+                                coerced[field] = dt.strftime("%Y-%m-01")
+                            except:
+                                coerced[field] = str(val)
+                    else:
+                        coerced[field] = str(val)
+                else:
+                    coerced[field] = val
+
+            if errors:
+                print("[SchemaCheck] Errors:")
+                for e in errors:
+                    print("  -", e)
+                return False
+
+            print("[SchemaCheck] All fields match expected types ✔")
+            return True
+
+        except Exception as e:
+            print("[SchemaCheck] Error validating schema:", e)
+            return False
+
+
+
 
     # ========== After Tool ==========
     async def after_tool_callback(
@@ -143,6 +231,10 @@ class KeyPlugin(BasePlugin):
         
         # 檢查 qllm_remote 是否正常
         if tool.name == "qllm_remote":
+            ok = self._validate_qllm_schema(tool_args, result)
+            if not ok:
+                raise ValueError(f"Q-LLM 回傳的資料不符合格式或型別要求！")
+
             if isinstance(result, dict) and "request" in result:
                 print(f"   {RED}  qllm_remote 返回了輸入，沒有實際處理{RESET}")
             else:
@@ -202,51 +294,60 @@ class KeyPlugin(BasePlugin):
     async def after_agent_callback(self, *, agent, callback_context):
         print(f"\n{BOLD}{YELLOW} [AfterAgent]{RESET} {agent.name}")
 
-        session = callback_context._invocation_context.session
-        events = session.events
+        try:
+            session = callback_context._invocation_context.session
+            events = getattr(session, "events", [])
 
-        last_model_event = next(
-            (e for e in reversed(events) if e.content.role == "model"),
-            None,
-        )
-        if not last_model_event:
-            print(f"   └─ No model event found")
-            return None
+            # 找到最後一個 model event（要防止 e.content 為 None）
+            last_model_event = next(
+                (e for e in reversed(events) if e.content and getattr(e.content, "role", None) == "model"),
+                None,
+            )
 
-        original_content: genai_types.Content = last_model_event.content
-        texts = [p.text for p in original_content.parts if getattr(p, "text", None)]
-        
-        if not texts:
-            print(f"   └─ No text parts found")
-            return None
-            
-        full_text = " ".join(texts)
-        print(f"   ├─ Original Output: {full_text}")
+            if not last_model_event:
+                print(f"   └─ No model event found")
+                return None
 
-        # 新功能：Resolve keys in final output
-        def replace_key(match):
-            key = match.group(1)
-            try:
-                resolved_value = self.handle_manager.resolve(key)
-                print(f"   {CYAN}Final key resolve:{RESET} key:{key} → {type(resolved_value).__name__}")
-                
-                if isinstance(resolved_value, dict):
-                    return json.dumps(resolved_value, ensure_ascii=False, indent=2)
-                elif isinstance(resolved_value, (list, tuple)):
-                    return json.dumps(resolved_value, ensure_ascii=False)
-                else:
-                    return str(resolved_value)
-            except KeyError:
-                print(f"{RED}Key not found in final output:{RESET} {key}")
-                return f"key:{key}"
+            original_content: genai_types.Content = last_model_event.content
 
-        # 使用正則表達式替換所有 key:xxx
-        modified_text = re.sub(r"key:([A-Za-z0-9\-]+)", replace_key, full_text)
-        
-        if modified_text != full_text:
-            print(f"   {GREEN}Final output modified{RESET}")
-            print(f"   └─ Resolved Output: {modified_text}")
-            return genai_types.Content(parts=[genai_types.Part(text=modified_text)])
-        else:
-            print(f"   └─ No keys to resolve in final output")
+            # 收集 text parts
+            texts = [p.text for p in getattr(original_content, "parts", []) if getattr(p, "text", None)]
+            if not texts:
+                print(f"   └─ No text parts found")
+                return None
+
+            full_text = " ".join(texts)
+            print(f"   ├─ Original Output: {full_text}")
+
+            # ========== Key Resolve ==========
+            def replace_key(match):
+                key = match.group(1)
+                try:
+                    resolved_value = self.handle_manager.resolve(key)
+                    print(f"   {CYAN}Final key resolve:{RESET} key:{key} → {type(resolved_value).__name__}")
+
+                    if isinstance(resolved_value, dict):
+                        return json.dumps(resolved_value, ensure_ascii=False, indent=2)
+                    elif isinstance(resolved_value, (list, tuple)):
+                        return json.dumps(resolved_value, ensure_ascii=False)
+                    else:
+                        return str(resolved_value)
+
+                except KeyError:
+                    print(f"{RED}Key not found in final output:{RESET} {key}")
+                    return f"key:{key}"
+
+            # 替換所有 key:xxxx
+            modified_text = re.sub(r"key:([A-Za-z0-9\-]+)", replace_key, full_text)
+
+            if modified_text != full_text:
+                print(f"   {GREEN}Final output modified{RESET}")
+                print(f"   └─ Resolved Output: {modified_text}")
+                return genai_types.Content(parts=[genai_types.Part(text=modified_text)])
+            else:
+                print(f"   └─ No keys to resolve in final output")
+                return None
+
+        except Exception as e:
+            print(f"{RED}[AfterAgent Error]{RESET} {e}")
             return None
